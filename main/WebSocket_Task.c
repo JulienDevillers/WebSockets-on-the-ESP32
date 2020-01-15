@@ -7,7 +7,6 @@
  * 
  * Copyright (c) 2019, Benjamin Aigner, beni@asterics-foundation.org
  * Implementation of 16bit length field for frames longer than 125bytes.
- * 
  *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
@@ -34,10 +33,10 @@
 
 #include "freertos/FreeRTOS.h"
 #include "esp_heap_caps.h"
-#include "hwcrypto/sha.h"
+#include "esp32/sha.h"
 #include "esp_system.h"
 #include "esp_log.h"
-#include "wpa2/utils/base64.h"
+#include "mbedtls/base64.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -104,7 +103,9 @@ err_t WS_write_data(char* p_data, size_t length) {
 
 	//check if header was send
 	if (result != ERR_OK)
+	{
 		return result;
+	}
         
         //send additional length field, if necessary
         if(hdr.payload_length == 126)
@@ -179,8 +180,9 @@ static void ws_server_netconn_serve(struct netconn *conn) {
 						(unsigned char*) p_SHA1_result);
 
 				//hex to base64
-				p_buf = (char*) base64_encode((unsigned char*) p_SHA1_result,
-						SHA1_RES_L, (size_t*) &i);
+				char encoded[255];
+				size_t written;
+				mbedtls_base64_encode((unsigned char*) encoded, sizeof(encoded), &written, (unsigned char*) p_SHA1_result, SHA1_RES_L);
                                 
 
 				//free SHA1 input
@@ -190,20 +192,17 @@ static void ws_server_netconn_serve(struct netconn *conn) {
 				free(p_SHA1_result);
 
 				//allocate memory for handshake
-				p_payload = malloc(sizeof(WS_srv_hs) + i - WS_SPRINTF_ARG_L);
+				p_payload = malloc(sizeof(WS_srv_hs) + written - WS_SPRINTF_ARG_L);
 
 				//check if malloc suceeded
 				if (p_payload != NULL) {
 
 					//prepare handshake
-					sprintf(p_payload, WS_srv_hs, i - 1, p_buf);
+					sprintf(p_payload, WS_srv_hs, written, encoded);
 
 					//send handshake
 					netconn_write(conn, p_payload, strlen(p_payload),
 							NETCONN_COPY);
-
-					//free base 64 encoded sec key
-					free(p_buf);
 
 					//free handshake memory
 					free(p_payload);
@@ -281,7 +280,7 @@ static void ws_server_netconn_serve(struct netconn *conn) {
 
 								//prepare FreeRTOS message
 								WebSocket_frame_t __ws_frame;
-								__ws_frame.conenction=conn;
+								__ws_frame.connection=conn;
 								__ws_frame.frame_header=*p_frame_hdr;
 								__ws_frame.payload_length=p_frame_hdr->payload_length;
 								__ws_frame.payload=p_payload;

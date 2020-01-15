@@ -46,7 +46,7 @@ typedef struct {
 
 /** \brief Websocket frame type*/
 typedef struct{
-	struct netconn* 	conenction;
+	struct netconn* 	connection;
 	WS_frame_header_t	frame_header;
 	size_t				payload_length;
 	char*				payload;
