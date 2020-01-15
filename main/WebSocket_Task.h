@@ -61,7 +61,7 @@ typedef struct{
  * 			#ERR_OK:	Header and payload send
  * 			all other values: derived from #netconn_write (sending frame header or payload)
  */
-err_t WS_write_data(char* p_data, size_t length);
+err_t WS_write_data(struct netconn* connection, char* p_data, size_t length);
 
 /**
  * \brief WebSocket Server task

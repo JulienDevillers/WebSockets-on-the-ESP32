@@ -8,6 +8,10 @@
  * Copyright (c) 2019, Benjamin Aigner, beni@asterics-foundation.org
  * Implementation of 16bit length field for frames longer than 125bytes.
  *
+ * Copyright (c) 2020, Julien Devillers, qdaemon.fr@gmail.com
+ * Implementation of the ability to run several connections at a time.
+ *
+ *
  * Permission is hereby granted, free of charge, to any person
  * obtaining a copy of this software and associated documentation
  * files (the "Software"), to deal in the Software without
@@ -59,19 +63,16 @@ typedef enum {
 //reference to the RX queue
 extern QueueHandle_t WebSocket_rx_queue;
 
-//Reference to open websocket connection
-static struct netconn* WS_conn = NULL;
-
 const char WS_sec_WS_keys[] = "Sec-WebSocket-Key:";
 const char WS_sec_conKey[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const char WS_srv_hs[] ="HTTP/1.1 101 Switching Protocols \r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %.*s\r\n\r\n";
 
 
-err_t WS_write_data(char* p_data, size_t length) {
+err_t WS_write_data(struct netconn* connection, char* p_data, size_t length) {
 
-	//check if we have an open connection
-	if (WS_conn == NULL)
-		return ERR_CONN;
+    //check if we have an open connection
+    if (connection == NULL)
+        return ERR_CONN;
 
 	//currently only 16bit length field is supported
 	if (length > 0xFFFF)
@@ -98,8 +99,8 @@ err_t WS_write_data(char* p_data, size_t length) {
                 hdr.payload_length = 127;
         }
 
-	//send header
-	result = netconn_write(WS_conn, &hdr, sizeof(WS_frame_header_t), NETCONN_COPY);
+        //send header
+        result = netconn_write(connection, &hdr, sizeof(WS_frame_header_t), NETCONN_COPY);
 
 	//check if header was send
 	if (result != ERR_OK)
@@ -111,16 +112,17 @@ err_t WS_write_data(char* p_data, size_t length) {
         if(hdr.payload_length == 126)
         {
                 char len = (length & 0xFF00) >> 8;
-                netconn_write(WS_conn, &len, 1, NETCONN_COPY);
+                netconn_write(connection, &len, 1, NETCONN_COPY);
                 len = length & 0x00FF;
-                netconn_write(WS_conn, &len, 1, NETCONN_COPY);
+                netconn_write(connection, &len, 1, NETCONN_COPY);
         }
 
 	//send payload
-	return netconn_write(WS_conn, p_data, length, NETCONN_COPY);
+	return netconn_write(connection, p_data, length, NETCONN_COPY);
 }
 
-static void ws_server_netconn_serve(struct netconn *conn) {
+static void ws_server_netconn_serve(void* pvParameters) {
+    struct netconn* conn = pvParameters;
 
 	//Netbuf
 	struct netbuf *inbuf;
@@ -206,9 +208,6 @@ static void ws_server_netconn_serve(struct netconn *conn) {
 
 					//free handshake memory
 					free(p_payload);
-
-					//set pointer to open WebSocket connection
-					WS_conn = conn;
 
 					//Wait for new data
 					while (netconn_recv(conn, &inbuf) == ERR_OK) {
@@ -304,8 +303,6 @@ static void ws_server_netconn_serve(struct netconn *conn) {
 		} //receive handshake
 	} //p_SHA1_Inp!=NULL&p_SHA1_result!=NULL
 
-	//release pointer to open WebSocket connection
-	WS_conn = NULL;
 
 	//delete buffer
 	netbuf_delete(inbuf);
@@ -316,20 +313,24 @@ static void ws_server_netconn_serve(struct netconn *conn) {
 	//Delete connection
 	netconn_delete(conn);
 
+    vTaskDelete(NULL);
 }
 
 void ws_server(void *pvParameters) {
-	//connection references
-	struct netconn *conn, *newconn;
+        //connection references
+        struct netconn *conn;
 
 	//set up new TCP listener
 	conn = netconn_new(NETCONN_TCP);
 	netconn_bind(conn, NULL, WS_PORT);
 	netconn_listen(conn);
 
-	//wait for connections
-	while (netconn_accept(conn, &newconn) == ERR_OK)
-		ws_server_netconn_serve(newconn);
+        //wait for connections
+        struct netconn* newconn;
+        while (netconn_accept(conn, &newconn) == ERR_OK)
+        {
+             xTaskCreate(&ws_server_netconn_serve, "ws_server_netconn_serve", 2048, newconn, 5, NULL);
+        }
 
 	//close connection
 	netconn_close(conn);

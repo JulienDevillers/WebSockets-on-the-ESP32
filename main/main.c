@@ -63,7 +63,7 @@ void task_process_WebSocket( void *pvParameters ){
         	printf("New Websocket frame. Length %d, payload %.*s \r\n", __RX_frame.payload_length, __RX_frame.payload_length, __RX_frame.payload);
 
         	//loop back frame
-        	WS_write_data(__RX_frame.payload, __RX_frame.payload_length);
+        	WS_write_data(__RX_frame.connection, __RX_frame.payload, __RX_frame.payload_length);
 
         	//free memory
 			if (__RX_frame.payload != NULL)
